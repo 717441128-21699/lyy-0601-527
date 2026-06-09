@@ -11,7 +11,8 @@ import {
   CreateMilestoneDto,
   UpdateMilestoneDto,
 } from './dto/task.dto';
-import { TaskStatus, OperationType } from '@prisma/client';
+import { TaskStatus, OperationType, MessageType } from '@prisma/client';
+import * as dayjs from 'dayjs';
 
 @Injectable()
 export class TaskService {
@@ -546,6 +547,30 @@ export class TaskService {
       },
     });
 
+    if (createMilestoneDto.remindDays && createMilestoneDto.remindDays.length > 0) {
+      const members = await this.prisma.projectMember.findMany({
+        where: { projectId },
+        select: { userId: true },
+      });
+
+      const memberIds = members.map((m) => m.userId);
+      const targetDate = dayjs(milestone.targetDate);
+      const maxRemindDays = Math.max(...createMilestoneDto.remindDays);
+      const nearestRemindDate = targetDate.subtract(maxRemindDays, 'day');
+
+      if (nearestRemindDate.isAfter(dayjs()) || nearestRemindDate.isSame(dayjs(), 'day')) {
+        await this.messageService.createMany(
+          memberIds,
+          MessageType.MILESTONE_REMINDER,
+          `里程碑提醒: ${milestone.name}`,
+          `里程碑「${milestone.name}」将于 ${maxRemindDays} 天后到期，目标日期: ${targetDate.format('YYYY-MM-DD')}`,
+          userId,
+          milestone.id,
+          'Milestone',
+        );
+      }
+    }
+
     await this.operationLogService.log(
       userId,
       OperationType.CREATE,
@@ -566,6 +591,52 @@ export class TaskService {
         _count: { select: { tasks: true } },
       },
       orderBy: { targetDate: 'asc' },
+    });
+  }
+
+  async getUpcomingMilestoneReminders(projectId: string) {
+    const now = dayjs();
+    const thirtyDaysLater = now.add(30, 'day').toDate();
+
+    const milestones = await this.prisma.milestone.findMany({
+      where: {
+        projectId,
+        deletedAt: null,
+        achievedAt: null,
+        targetDate: {
+          gte: now.toDate(),
+          lte: thirtyDaysLater,
+        },
+      },
+      include: {
+        _count: { select: { tasks: true } },
+        tasks: {
+          where: { status: { notIn: [TaskStatus.DONE, TaskStatus.CANCELLED] } },
+          select: { id: true, title: true, status: true },
+        },
+      },
+      orderBy: { targetDate: 'asc' },
+    });
+
+    return milestones.map((m) => {
+      const daysUntil = dayjs(m.targetDate).diff(now, 'day');
+      const totalTasks = m._count.tasks;
+      const completedTasks = totalTasks - m.tasks.length;
+      const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+      return {
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        targetDate: m.targetDate,
+        daysUntil,
+        remindDays: m.remindDays,
+        progress,
+        totalTasks,
+        completedTasks,
+        pendingTasks: m.tasks.length,
+        isUrgent: daysUntil <= 3,
+      };
     });
   }
 

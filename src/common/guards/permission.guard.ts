@@ -22,7 +22,7 @@ export class PermissionGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
     const userId = request.user?.id;
-    const projectId = request.params.projectId || request.body.projectId;
+    const projectId = request.params.projectId || request.params.id || request.body.projectId;
 
     if (!userId || !projectId) {
       return true;

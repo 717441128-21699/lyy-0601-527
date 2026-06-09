@@ -31,6 +31,54 @@ export class TaskController {
     return this.taskService.findMyTodos(user.id, paginationDto.page, paginationDto.pageSize);
   }
 
+  @Get('milestones')
+  @ApiOperation({ summary: '获取项目里程碑列表' })
+  @RequirePermission({ module: 'task', action: 'view' })
+  async getMilestones(@Param('projectId') projectId: string) {
+    return this.taskService.getMilestones(projectId);
+  }
+
+  @Post('milestones')
+  @ApiOperation({ summary: '创建里程碑' })
+  @RequirePermission({ module: 'task', action: 'create' })
+  async createMilestone(
+    @CurrentUser() user: { id: string },
+    @Param('projectId') projectId: string,
+    @Body() createMilestoneDto: CreateMilestoneDto,
+  ) {
+    return this.taskService.createMilestone(user.id, projectId, createMilestoneDto);
+  }
+
+  @Get('milestones/upcoming-reminders')
+  @ApiOperation({ summary: '获取即将到期的里程碑提醒' })
+  @RequirePermission({ module: 'task', action: 'view' })
+  async getUpcomingMilestoneReminders(@Param('projectId') projectId: string) {
+    return this.taskService.getUpcomingMilestoneReminders(projectId);
+  }
+
+  @Patch('milestones/:id')
+  @ApiOperation({ summary: '更新里程碑' })
+  @RequirePermission({ module: 'task', action: 'edit' })
+  async updateMilestone(
+    @CurrentUser() user: { id: string },
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Body() updateMilestoneDto: UpdateMilestoneDto,
+  ) {
+    return this.taskService.updateMilestone(user.id, projectId, id, updateMilestoneDto);
+  }
+
+  @Delete('milestones/:id')
+  @ApiOperation({ summary: '删除里程碑' })
+  @RequirePermission({ module: 'task', action: 'delete' })
+  async deleteMilestone(
+    @CurrentUser() user: { id: string },
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    return this.taskService.deleteMilestone(user.id, projectId, id);
+  }
+
   @Post()
   @ApiOperation({ summary: '创建任务' })
   @RequirePermission({ module: 'task', action: 'create' })
@@ -111,46 +159,5 @@ export class TaskController {
   @RequirePermission({ module: 'task', action: 'view' })
   async getStatusHistories(@Param('id') id: string) {
     return this.taskService.getStatusHistories(id);
-  }
-
-  @Get('milestones')
-  @ApiOperation({ summary: '获取项目里程碑列表' })
-  @RequirePermission({ module: 'task', action: 'view' })
-  async getMilestones(@Param('projectId') projectId: string) {
-    return this.taskService.getMilestones(projectId);
-  }
-
-  @Post('milestones')
-  @ApiOperation({ summary: '创建里程碑' })
-  @RequirePermission({ module: 'task', action: 'create' })
-  async createMilestone(
-    @CurrentUser() user: { id: string },
-    @Param('projectId') projectId: string,
-    @Body() createMilestoneDto: CreateMilestoneDto,
-  ) {
-    return this.taskService.createMilestone(user.id, projectId, createMilestoneDto);
-  }
-
-  @Patch('milestones/:id')
-  @ApiOperation({ summary: '更新里程碑' })
-  @RequirePermission({ module: 'task', action: 'edit' })
-  async updateMilestone(
-    @CurrentUser() user: { id: string },
-    @Param('projectId') projectId: string,
-    @Param('id') id: string,
-    @Body() updateMilestoneDto: UpdateMilestoneDto,
-  ) {
-    return this.taskService.updateMilestone(user.id, projectId, id, updateMilestoneDto);
-  }
-
-  @Delete('milestones/:id')
-  @ApiOperation({ summary: '删除里程碑' })
-  @RequirePermission({ module: 'task', action: 'delete' })
-  async deleteMilestone(
-    @CurrentUser() user: { id: string },
-    @Param('projectId') projectId: string,
-    @Param('id') id: string,
-  ) {
-    return this.taskService.deleteMilestone(user.id, projectId, id);
   }
 }

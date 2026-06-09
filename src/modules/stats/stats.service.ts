@@ -19,7 +19,7 @@ export class StatsService {
     const [tasks, members, milestones] = await Promise.all([
       this.prisma.task.findMany({
         where: { projectId, deletedAt: null },
-        select: { status: true, priority: true, dueDate: true, completedAt: true, actualHours: true, estimatedHours: true },
+        select: { status: true, priority: true, dueDate: true, completedAt: true, actualHours: true, estimatedHours: true, createdAt: true },
       }),
       this.prisma.projectMember.count({ where: { projectId } }),
       this.prisma.milestone.findMany({
@@ -55,7 +55,7 @@ export class StatsService {
     ).length;
 
     const thisWeekCreated = tasks.filter(
-      (t) => t.completedAt && t.completedAt >= startOfWeek && t.completedAt <= endOfWeek,
+      (t) => t.createdAt >= startOfWeek && t.createdAt <= endOfWeek,
     ).length;
 
     const milestoneStats = milestones.map((m) => {
