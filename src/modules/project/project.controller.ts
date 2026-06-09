@@ -56,9 +56,9 @@ export class ProjectController {
   }
 
   @Get(':id/members')
-  @ApiOperation({ summary: '获取项目成员列表' })
+  @ApiOperation({ summary: '获取项目成员列表(仅管理员可见)' })
   @UseGuards(PermissionGuard)
-  @RequirePermission({ module: 'project', action: 'view' })
+  @RequirePermission({ module: 'project', action: 'manageMembers' })
   async getMembers(@Param('id') id: string) {
     return this.projectService.getMembers(id);
   }

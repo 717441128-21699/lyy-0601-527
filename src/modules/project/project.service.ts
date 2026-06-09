@@ -258,12 +258,22 @@ export class ProjectService {
   }
 
   async inviteMember(userId: string, projectId: string, inviteMemberDto: InviteMemberDto) {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId, deletedAt: null },
-    });
+    const [project, operator] = await Promise.all([
+      this.prisma.project.findUnique({
+        where: { id: projectId, deletedAt: null },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, username: true, fullName: true },
+      }),
+    ]);
 
     if (!project) {
       throw new NotFoundException('项目不存在');
+    }
+
+    if (!operator) {
+      throw new NotFoundException('操作人不存在');
     }
 
     const { userIdentifier, roleId } = inviteMemberDto;
@@ -294,6 +304,11 @@ export class ProjectService {
       targetRoleId = defaultRole?.id;
     }
 
+    const targetRole = await this.prisma.projectRole.findUnique({
+      where: { id: targetRoleId },
+      select: { id: true, name: true },
+    });
+
     const member = await this.prisma.projectMember.create({
       data: {
         projectId,
@@ -304,14 +319,18 @@ export class ProjectService {
       include: {
         user: { select: { id: true, username: true, fullName: true, avatar: true, email: true } },
         role: { select: { id: true, name: true } },
+        invitedByUser: { select: { id: true, username: true, fullName: true } },
       },
     });
+
+    const operatorName = operator.fullName || operator.username;
+    const targetUserName = user.fullName || user.username;
 
     await this.messageService.create(
       user.id,
       'MEMBER_INVITED',
-      `您被邀请加入项目`,
-      `您已被邀请加入项目 "${project.name}"`,
+      `您被邀请加入项目 ${project.name}`,
+      `${operatorName} 邀请您加入项目 "${project.name}"，角色为: ${targetRole?.name || '成员'}`,
       userId,
       projectId,
       'Project',
@@ -322,8 +341,15 @@ export class ProjectService {
       OperationType.INVITE,
       'ProjectMember',
       member.id,
-      `邀请了成员: ${user.fullName || user.username} 加入项目`,
-      { userId: user.id, roleId: targetRoleId },
+      `${operatorName} 邀请了成员 ${targetUserName} 加入项目，角色: ${targetRole?.name || '成员'}`,
+      {
+        operatorId: userId,
+        operatorName,
+        targetUserId: user.id,
+        targetUserName,
+        roleId: targetRoleId,
+        roleName: targetRole?.name,
+      },
       projectId,
     );
 
@@ -331,12 +357,22 @@ export class ProjectService {
   }
 
   async removeMember(userId: string, projectId: string, memberId: string) {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId, deletedAt: null },
-    });
+    const [project, operator] = await Promise.all([
+      this.prisma.project.findUnique({
+        where: { id: projectId, deletedAt: null },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, username: true, fullName: true },
+      }),
+    ]);
 
     if (!project) {
       throw new NotFoundException('项目不存在');
+    }
+
+    if (!operator) {
+      throw new NotFoundException('操作人不存在');
     }
 
     const member = await this.prisma.projectMember.findUnique({
@@ -354,11 +390,14 @@ export class ProjectService {
 
     await this.prisma.projectMember.delete({ where: { id: memberId } });
 
+    const operatorName = operator.fullName || operator.username;
+    const targetUserName = member.user.fullName || member.user.username;
+
     await this.messageService.create(
       member.userId,
       'SYSTEM',
-      `您已被移出项目`,
-      `您已被移出项目 "${project.name}"`,
+      `您已被移出项目 ${project.name}`,
+      `${operatorName} 将您移出了项目 "${project.name}"`,
       userId,
       projectId,
       'Project',
@@ -369,8 +408,14 @@ export class ProjectService {
       OperationType.REMOVE,
       'ProjectMember',
       memberId,
-      `移除了成员: ${member.user.fullName || member.user.username}`,
-      null,
+      `${operatorName} 移除了成员 ${targetUserName}`,
+      {
+        operatorId: userId,
+        operatorName,
+        targetUserId: member.userId,
+        targetUserName,
+        oldRole: member.role?.name,
+      },
       projectId,
     );
 
@@ -389,12 +434,22 @@ export class ProjectService {
   }
 
   async updateMemberRole(userId: string, projectId: string, memberId: string, roleId: string) {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId, deletedAt: null },
-    });
+    const [project, operator] = await Promise.all([
+      this.prisma.project.findUnique({
+        where: { id: projectId, deletedAt: null },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, username: true, fullName: true },
+      }),
+    ]);
 
     if (!project) {
       throw new NotFoundException('项目不存在');
+    }
+
+    if (!operator) {
+      throw new NotFoundException('操作人不存在');
     }
 
     const member = await this.prisma.projectMember.findUnique({
@@ -423,13 +478,37 @@ export class ProjectService {
       },
     });
 
+    const operatorName = operator.fullName || operator.username;
+    const targetUserName = member.user.fullName || member.user.username;
+    const oldRoleName = member.role?.name || '无';
+    const newRoleName = role.name;
+
+    if (member.userId !== userId) {
+      await this.messageService.create(
+        member.userId,
+        'SYSTEM',
+        `您在项目 ${project.name} 的角色已变更`,
+        `${operatorName} 将您在项目 "${project.name}" 的角色从 ${oldRoleName} 变更为 ${newRoleName}`,
+        userId,
+        projectId,
+        'Project',
+      );
+    }
+
     await this.operationLogService.log(
       userId,
       OperationType.PERMISSION_CHANGE,
       'ProjectMember',
       memberId,
-      `更新了成员 ${member.user.fullName || member.user.username} 的角色: ${member.role?.name} -> ${role.name}`,
-      { oldRole: member.role?.name, newRole: role.name },
+      `${operatorName} 更新了成员 ${targetUserName} 的角色: ${oldRoleName} -> ${newRoleName}`,
+      {
+        operatorId: userId,
+        operatorName,
+        targetUserId: member.userId,
+        targetUserName,
+        oldRole: oldRoleName,
+        newRole: newRoleName,
+      },
       projectId,
     );
 

@@ -73,4 +73,18 @@ export class StatsController {
   async getMemberPerformance(@Param('projectId') projectId: string) {
     return this.statsService.getMemberPerformance(projectId);
   }
+
+  @Get('projects/:projectId/stats/health')
+  @ApiOperation({ summary: '获取项目健康度评估' })
+  @UseGuards(PermissionGuard)
+  @RequirePermission({ module: 'stats', action: 'view' })
+  async getProjectHealth(@Param('projectId') projectId: string) {
+    return this.statsService.getProjectHealth(projectId);
+  }
+
+  @Get('stats/me/unified-todos')
+  @ApiOperation({ summary: '获取个人统一待办(任务+日程+里程碑提醒)' })
+  async getUnifiedTodos(@CurrentUser() user: { id: string }) {
+    return this.statsService.getUnifiedTodos(user.id);
+  }
 }

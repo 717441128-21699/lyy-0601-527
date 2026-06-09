@@ -110,6 +110,7 @@ model User {
   messages              Message[]           @relation("MessageReceiver")
   sentMessages          Message[]           @relation("MessageSender")
   operationLogs         OperationLog[]
+  invitedMembers        ProjectMember[]     @relation("MemberInviter")
 
   @@index([email])
   @@index([username])
@@ -131,14 +132,15 @@ model Project {
   updatedAt       DateTime      @updatedAt
   deletedAt       DateTime?
 
-  owner           User          @relation("ProjectOwner", fields: [ownerId], references: [id])
-  members         ProjectMember[]
-  roles           ProjectRole[]
-  tasks           Task[]
-  milestones      Milestone[]
-  schedules       Schedule[]
-  files           File[]
-  operationLogs   OperationLog[]
+  owner               User                  @relation("ProjectOwner", fields: [ownerId], references: [id])
+  members             ProjectMember[]
+  roles               ProjectRole[]
+  tasks               Task[]
+  milestones          Milestone[]
+  schedules           Schedule[]
+  files               File[]
+  operationLogs       OperationLog[]
+  milestoneReminders  MilestoneReminder[]
 
   @@index([ownerId])
   @@index([status])
@@ -158,10 +160,12 @@ model ProjectMember {
   project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   role            ProjectRole?  @relation(fields: [roleId], references: [id])
+  invitedByUser   User?         @relation("MemberInviter", fields: [invitedBy], references: [id])
 
   @@unique([projectId, userId])
   @@index([projectId])
   @@index([userId])
+  @@index([invitedBy])
 }
 
 model ProjectRole {
@@ -256,22 +260,40 @@ model TaskComment {
 }
 
 model Milestone {
-  id              String        @id @default(uuid())
+  id              String                @id @default(uuid())
   projectId       String
   name            String
   description     String?
   targetDate      DateTime
   achievedAt      DateTime?
-  remindDays      Int[]         @default([7, 3, 1])
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  remindDays      Int[]                 @default([7, 3, 1])
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
   deletedAt       DateTime?
 
-  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project         Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
   tasks           Task[]
+  reminders       MilestoneReminder[]
 
   @@index([projectId])
   @@index([targetDate])
+}
+
+model MilestoneReminder {
+  id              String        @id @default(uuid())
+  milestoneId     String
+  projectId       String
+  remindDay       Int
+  sentAt          DateTime      @default(now())
+  sentTo          String[]      @default([])
+
+  milestone       Milestone     @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([milestoneId, remindDay])
+  @@index([milestoneId])
+  @@index([projectId])
+  @@index([sentAt])
 }
 
 model Schedule {

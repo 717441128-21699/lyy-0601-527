@@ -22,6 +22,19 @@ import { PaginationDto } from '../../common/dto/pagination.dto';
 export class TaskController {
   constructor(private readonly taskService: TaskService) {}
 
+  @Post('milestones/check-reminders')
+  @ApiOperation({ summary: '检查并发送里程碑到期提醒' })
+  @RequirePermission({ module: 'task', action: 'view' })
+  async checkMilestoneReminders(@Param('projectId') projectId: string) {
+    const results = await this.taskService.checkAndSendMilestoneReminders(projectId);
+    return {
+      message: '提醒检查完成',
+      totalMilestones: results.length,
+      newlySent: results.filter((r) => r.sent).length,
+      details: results,
+    };
+  }
+
   @Get('my-todos')
   @ApiOperation({ summary: '获取我的待办任务(跨项目)' })
   async getMyTodos(

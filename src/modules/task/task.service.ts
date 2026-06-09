@@ -547,30 +547,6 @@ export class TaskService {
       },
     });
 
-    if (createMilestoneDto.remindDays && createMilestoneDto.remindDays.length > 0) {
-      const members = await this.prisma.projectMember.findMany({
-        where: { projectId },
-        select: { userId: true },
-      });
-
-      const memberIds = members.map((m) => m.userId);
-      const targetDate = dayjs(milestone.targetDate);
-      const maxRemindDays = Math.max(...createMilestoneDto.remindDays);
-      const nearestRemindDate = targetDate.subtract(maxRemindDays, 'day');
-
-      if (nearestRemindDate.isAfter(dayjs()) || nearestRemindDate.isSame(dayjs(), 'day')) {
-        await this.messageService.createMany(
-          memberIds,
-          MessageType.MILESTONE_REMINDER,
-          `里程碑提醒: ${milestone.name}`,
-          `里程碑「${milestone.name}」将于 ${maxRemindDays} 天后到期，目标日期: ${targetDate.format('YYYY-MM-DD')}`,
-          userId,
-          milestone.id,
-          'Milestone',
-        );
-      }
-    }
-
     await this.operationLogService.log(
       userId,
       OperationType.CREATE,
@@ -584,6 +560,106 @@ export class TaskService {
     return milestone;
   }
 
+  async checkAndSendMilestoneReminders(projectId?: string) {
+    const now = dayjs();
+    const today = now.startOf('day');
+
+    const where: any = {
+      deletedAt: null,
+      achievedAt: null,
+      targetDate: { gte: today.toDate() },
+    };
+    if (projectId) {
+      where.projectId = projectId;
+    }
+
+    const milestones = await this.prisma.milestone.findMany({
+      where,
+      include: {
+        _count: { select: { tasks: true } },
+        tasks: {
+          where: { status: { notIn: [TaskStatus.DONE, TaskStatus.CANCELLED] } },
+          select: { id: true },
+        },
+      },
+    });
+
+    const milestoneProjects = await this.prisma.project.findMany({
+      where: { id: { in: milestones.map((m) => m.projectId) } },
+      select: { id: true, name: true },
+    });
+
+    const projectMap = new Map(milestoneProjects.map((p) => [p.id, p.name]));
+
+    const results: Array<{
+      milestoneId: string; milestoneName: string; projectName: string; remindDay: number; daysUntil: number; sent: boolean; sentTo: string[] }> = [];
+
+    for (const milestone of milestones) {
+      if (!milestone.remindDays || milestone.remindDays.length === 0) continue;
+
+      const daysUntil = dayjs(milestone.targetDate).diff(today, 'day');
+
+      for (const remindDay of milestone.remindDays) {
+        if (daysUntil === remindDay) {
+          const existingReminder = await this.prisma.milestoneReminder.findUnique({
+            where: { milestoneId_remindDay: { milestoneId: milestone.id, remindDay } },
+          });
+
+          if (!existingReminder) {
+            const members = await this.prisma.projectMember.findMany({
+              where: { projectId: milestone.projectId },
+              select: { userId: true },
+            });
+            const memberIds = members.map((m) => m.userId);
+
+            await this.prisma.$transaction(async (tx) => {
+              await this.messageService.createMany(
+                memberIds,
+                MessageType.MILESTONE_REMINDER,
+                `里程碑提醒: ${milestone.name}`,
+                `里程碑「${milestone.name}」将于 ${remindDay} 天后到期，目标日期: ${dayjs(milestone.targetDate).format('YYYY-MM-DD')}，所属项目: ${projectMap.get(milestone.projectId) || '未知项目'}，还有 ${milestone.tasks.length} 个待办任务`,
+                undefined,
+                milestone.id,
+                'Milestone',
+              );
+
+              await tx.milestoneReminder.create({
+                data: {
+                milestoneId: milestone.id,
+                projectId: milestone.projectId,
+                remindDay,
+                sentTo: memberIds,
+              },
+            });
+          });
+
+            results.push({
+              milestoneId: milestone.id,
+              milestoneName: milestone.name,
+              projectName: projectMap.get(milestone.projectId) || '未知项目',
+              remindDay,
+              daysUntil,
+              sent: true,
+              sentTo: memberIds,
+            });
+          } else {
+            results.push({
+              milestoneId: milestone.id,
+              milestoneName: milestone.name,
+              projectName: projectMap.get(milestone.projectId) || '未知项目',
+              remindDay,
+              daysUntil,
+              sent: false,
+              sentTo: existingReminder.sentTo,
+            });
+          }
+        }
+      }
+    }
+
+    return results;
+  }
+
   async getMilestones(projectId: string) {
     return this.prisma.milestone.findMany({
       where: { projectId, deletedAt: null },
@@ -594,50 +670,74 @@ export class TaskService {
     });
   }
 
-  async getUpcomingMilestoneReminders(projectId: string) {
+  async getUpcomingMilestoneReminders(projectId: string, userId?: string) {
     const now = dayjs();
-    const thirtyDaysLater = now.add(30, 'day').toDate();
+    const today = now.startOf('day');
+
+    await this.checkAndSendMilestoneReminders(projectId);
+
+    const where: any = {
+      projectId,
+      deletedAt: null,
+      achievedAt: null,
+    };
+
+    if (userId) {
+      where.reminders = {
+        some: {
+          sentTo: { has: userId },
+        },
+      };
+    }
 
     const milestones = await this.prisma.milestone.findMany({
-      where: {
-        projectId,
-        deletedAt: null,
-        achievedAt: null,
-        targetDate: {
-          gte: now.toDate(),
-          lte: thirtyDaysLater,
-        },
-      },
+      where,
       include: {
         _count: { select: { tasks: true } },
         tasks: {
           where: { status: { notIn: [TaskStatus.DONE, TaskStatus.CANCELLED] } },
           select: { id: true, title: true, status: true },
         },
+        reminders: {
+          orderBy: { remindDay: 'asc' },
+        },
       },
       orderBy: { targetDate: 'asc' },
     });
 
-    return milestones.map((m) => {
-      const daysUntil = dayjs(m.targetDate).diff(now, 'day');
-      const totalTasks = m._count.tasks;
-      const completedTasks = totalTasks - m.tasks.length;
-      const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+    return milestones
+      .filter((m) => {
+        const daysUntil = dayjs(m.targetDate).diff(today, 'day');
+        return m.remindDays?.some((rd) => rd >= daysUntil) && daysUntil >= 0;
+      })
+      .map((m) => {
+        const daysUntil = dayjs(m.targetDate).diff(today, 'day');
+        const totalTasks = m._count.tasks;
+        const completedTasks = totalTasks - m.tasks.length;
+        const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+        const nextRemindDay = m.remindDays?.find((rd) => rd >= daysUntil);
 
-      return {
-        id: m.id,
-        name: m.name,
-        description: m.description,
-        targetDate: m.targetDate,
-        daysUntil,
-        remindDays: m.remindDays,
-        progress,
-        totalTasks,
-        completedTasks,
-        pendingTasks: m.tasks.length,
-        isUrgent: daysUntil <= 3,
-      };
-    });
+        return {
+          id: m.id,
+          name: m.name,
+          description: m.description,
+          targetDate: m.targetDate,
+          daysUntil,
+          remindDays: m.remindDays,
+          nextRemindDay,
+          progress,
+          totalTasks,
+          completedTasks,
+          pendingTasks: m.tasks.length,
+          isUrgent: daysUntil <= 3,
+          isToday: daysUntil === 0,
+          reminders: m.reminders.map((r) => ({
+            remindDay: r.remindDay,
+            sentAt: r.sentAt,
+            sentTo: r.sentTo,
+          })),
+        };
+      });
   }
 
   async updateMilestone(userId: string, projectId: string, id: string, updateMilestoneDto: UpdateMilestoneDto) {
